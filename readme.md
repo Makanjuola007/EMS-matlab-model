@@ -450,3 +450,6 @@ energy = trapz(tout, PV_Power);
 This comprehensive PV model provides a robust foundation for solar inverter simulation. Each block serves a specific purpose in creating a realistic representation of photovoltaic array behavior, enabling accurate analysis of MPPT performance, system efficiency, and dynamic response to environmental conditions.
 
 The modular design allows for easy integration with inverter control systems while maintaining computational efficiency and numerical stability essential for real-time simulation applications.
+
+
+video: https://www.loom.com/share/4b53fcb8291b4487a9246ad82f6b6617?sid=9da11f11-b31b-40b0-a034-6b508b479177
