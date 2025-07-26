@@ -1,133 +1,123 @@
-function results = run_basic_simulation(solar_data, load_data, price_data, params)
-    % Run a basic energy system simulation
-    % Inputs:
-    %   solar_data: Array of solar generation values (kW)
-    %   load_data: Array of load demand values (kW)
-    %   price_data: Array of electricity prices (pence/kWh)
-    %   params: System parameters structure
-    %
-    % Output:
-    %   results: Structure with simulation results
-    
-    % Validate inputs
-    n_points = length(solar_data);
-    if length(load_data) ~= n_points || length(price_data) ~= n_points
-        error('All input arrays must have the same length');
-    end
-    
-    % Initialize system parameters
-    if nargin < 4
-        params = struct();
-    end
-    
-    % Default system parameters
-    params.battery_capacity = getfield_default(params, 'battery_capacity', 10); % kWh
-    params.initial_soc = getfield_default(params, 'initial_soc', 0.5);         % 50%
-    params.max_charge_rate = getfield_default(params, 'max_charge_rate', 5.0);
-    params.max_discharge_rate = getfield_default(params, 'max_discharge_rate', 5.0);
-    params.battery_efficiency = getfield_default(params, 'battery_efficiency', 0.95);
-    params.time_step = getfield_default(params, 'time_step', 5/60); % 5 minutes in hours
-    
-    % Initialize result arrays
-    battery_soc = zeros(n_points, 1);
-    battery_action = zeros(n_points, 1);
-    grid_action = zeros(n_points, 1);
-    decisions = cell(n_points, 1);
-    
-    % Initialize battery state
-    current_soc = params.initial_soc;
-    
-    % Main simulation loop
-    for i = 1:n_points
-        % Store current SOC
-        battery_soc(i) = current_soc;
-        
-        % Run energy balance decision
-        [batt_action, grid_action(i), decision] = energy_balance_solis(...
-            solar_data(i), load_data(i), current_soc, price_data(i), params);
-        
-        battery_action(i) = batt_action;
-        decisions{i} = decision;
-        
-        % Update battery SOC
-        if batt_action > 0
-            % Charging
-            energy_stored = batt_action * params.time_step * params.battery_efficiency;
-            current_soc = min(params.max_soc, current_soc + energy_stored / params.battery_capacity);
-        elseif batt_action < 0
-            % Discharging
-            energy_used = -batt_action * params.time_step / params.battery_efficiency;
-            current_soc = max(params.min_soc, current_soc - energy_used / params.battery_capacity);
-        end
-        
-        % Ensure SOC stays within bounds
-        current_soc = max(params.min_soc, min(params.max_soc, current_soc));
-    end
-    
-    % Calculate financial metrics
-    grid_import = max(0, grid_action);
-    grid_export = max(0, -grid_action);
-    
-    import_cost = sum(grid_import .* price_data .* params.time_step);
-    export_income = sum(grid_export .* price_data .* params.time_step * 0.5); % Assume 50% export rate
-    
-    net_cost = import_cost - export_income;
-    
-    % Calculate energy metrics
-    total_solar = sum(solar_data .* params.time_step);
-    total_load = sum(load_data .* params.time_step);
-    total_grid_import = sum(grid_import .* params.time_step);
-    total_grid_export = sum(grid_export .* params.time_step);
-    
-    self_consumption_rate = 1 - (total_grid_export / total_solar);
-    grid_independence = 1 - (total_grid_import / total_load);
-    
-    % Package results
-    results = struct();
-    results.time_series = struct();
-    results.time_series.battery_soc = battery_soc;
-    results.time_series.battery_action = battery_action;
-    results.time_series.grid_action = grid_action;
-    results.time_series.grid_import = grid_import;
-    results.time_series.grid_export = grid_export;
-    results.time_series.decisions = decisions;
-    
-    results.financial = struct();
-    results.financial.import_cost = import_cost;
-    results.financial.export_income = export_income;
-    results.financial.net_cost = net_cost;
-    results.financial.daily_cost = net_cost / (n_points * params.time_step / 24);
-    
-    results.energy = struct();
-    results.energy.total_solar = total_solar;
-    results.energy.total_load = total_load;
-    results.energy.total_grid_import = total_grid_import;
-    results.energy.total_grid_export = total_grid_export;
-    results.energy.self_consumption_rate = self_consumption_rate;
-    results.energy.grid_independence = grid_independence;
-    
-    results.params = params;
-    
-    % Display summary
-    fprintf('\n=== Simulation Results ===\n');
-    fprintf('Simulation period: %.1f hours\n', n_points * params.time_step);
-    fprintf('Total solar generation: %.2f kWh\n', total_solar);
-    fprintf('Total load consumption: %.2f kWh\n', total_load);
-    fprintf('Grid import: %.2f kWh\n', total_grid_import);
-    fprintf('Grid export: %.2f kWh\n', total_grid_export);
-    fprintf('Self-consumption rate: %.1f%%\n', self_consumption_rate * 100);
-    fprintf('Grid independence: %.1f%%\n', grid_independence * 100);
-    fprintf('Import cost: £%.2f\n', import_cost / 100);
-    fprintf('Export income: £%.2f\n', export_income / 100);
-    fprintf('Net cost: £%.2f\n', net_cost / 100);
-    fprintf('Daily cost: £%.2f\n', results.financial.daily_cost / 100);
+% Energy System Simulation for 24 Hours
+modelName = 'EnergyMonitoring24h';
+new_system(modelName);
+open_system(modelName);
+
+set_param(modelName, 'StopTime', '86400');  % 24 hours in seconds
+
+% Create time vector (1000 points over 24 hours)
+time = linspace(0, 86400, 1000);
+
+% Sample synthetic profiles for signals
+dcv_pv = 500 * max(0, sin(pi * (time / 86400)));
+dci_pv = 10 * max(0, sin(pi * (time / 86400)));
+
+ac_voltage = 230 + 10*sin(2*pi*time/86400);
+ac_current = 5 + 2*sin(2*pi*time/43200);
+ac_power = ac_voltage .* ac_current;
+ac_freq = 50 + 0.1*sin(2*pi*time/86400);
+
+total_energy_gen = cumtrapz(time, ac_power)/3600;
+total_power_consumed = ac_power .* (0.6 + 0.4*sin(2*pi*time/43200));
+total_energy_consumed = cumtrapz(time, total_power_consumed)/3600;
+
+grid_voltage = 240 + 5*sin(2*pi*time/43200);
+grid_current = 4 + 2*cos(2*pi*time/43200);
+grid_reactive_power = 100 * sin(2*pi*time/43200);
+grid_apparent_power = sqrt((grid_voltage.*grid_current).^2 + grid_reactive_power.^2);
+grid_power_factor = ac_power ./ (grid_apparent_power + eps);
+
+total_on_grid_gen = ac_power .* (0.5 + 0.5*sin(2*pi*time/86400));
+meter_power = total_power_consumed - total_on_grid_gen;
+
+% Battery signals (realistic charge/discharge pattern)
+b_voltage = 48 + 0.5 * (mod(time, 21600) < 10800);  % steps up during charge period (6hrs)
+b_current = 10 * (mod(time, 43200) < 21600);        % charges 6hrs, discharges 6hrs alternating
+b_power = b_voltage .* b_current;
+bsoc = 50 + 25 * sin(2*pi*time/86400);              % SOC varies slowly with time
+
+total_energy_charge = cumtrapz(time, max(b_power, 0))/3600;
+total_energy_discharge = cumtrapz(time, max(-b_power, 0))/3600;
+
+inverter_temp = 35 + 10*sin(2*pi*time/86400);
+bms_voltage = b_voltage + 0.5;
+bms_current = b_current;
+
+load_power = total_power_consumed;
+
+% Calculate time of day in seconds
+timeofday = mod(time, 86400);
+
+% Energy pricing logic (per second)
+rate = zeros(size(time));
+rate((timeofday >= 28800) & (timeofday < 82800)) = 25.92;   % 8:00 to 23:00
+rate((timeofday < 28800) | (timeofday >= 82800)) = 13.62;   % 23:00 to 8:00
+
+% Energy cost calculation in $/kWh converted to $/Wh, then compute instantaneous cost
+cost_per_wh = rate / 1000;
+energy_cost = total_power_consumed .* cost_per_wh;
+cumulative_energy_cost = cumtrapz(time, energy_cost);
+
+% Define signals
+signals = {
+    'DCV_PV1', dcv_pv;
+    'DCV_PV2', dcv_pv;
+    'DC_current1', dci_pv;
+    'DC_current2', dci_pv;
+    'AC_Voltage', ac_voltage;
+    'AC_current', ac_current;
+    'AC_ouputPOWER', ac_power;
+    'AC_freq', ac_freq;
+    'TotalEnergyGeneration', total_energy_gen;
+    'TotalPOWERconsumed', total_power_consumed;
+    'TotalconsumptionEnergy', total_energy_consumed;
+    'GridVoltage', grid_voltage;
+    'Gridcurrent', grid_current;
+    'PowergridReactivePower', grid_reactive_power;
+    'PowergridApparentPower', grid_apparent_power;
+    'GridPowerFactor', grid_power_factor;
+    'TotalOn_gridGeneration', total_on_grid_gen;
+    'meterpower', meter_power;
+    'Bvoltage', b_voltage;
+    'Bcurrent', b_current;
+    'Bpower', b_power;
+    'Bsoc', bsoc;
+    'totalEnergyCharge', total_energy_charge;
+    'totalEnergyDisCharge', total_energy_discharge;
+    'inveterTemp', inverter_temp;
+    'bmsVoltage', bms_voltage;
+    'bmscurrent', bms_current;
+    'loadpower', load_power;
+    'energyCost', energy_cost;
+    'cumulativeEnergyCost', cumulative_energy_cost
+};
+
+% Assign each timeseries to base workspace
+for i = 1:size(signals, 1)
+    ts = timeseries(signals{i,2}, time);
+    assignin('base', [signals{i,1} '_ts'], ts);
 end
 
-function value = getfield_default(struct_var, field_name, default_value)
-    % Helper function to get field with default value
-    if isfield(struct_var, field_name)
-        value = struct_var.(field_name);
-    else
-        value = default_value;
+% Create blocks in model
+x = 30; y = 30; xOffset = 300; yOffset = 70;
+for i = 1:size(signals,1)
+    sigName = signals{i,1};
+    fromBlock = [modelName '/' sigName '_From'];
+    scopeBlock = [modelName '/' sigName '_Scope'];
+
+    add_block('simulink/Sources/From Workspace', fromBlock, ...
+        'VariableName', [sigName '_ts'], 'Position', [x, y, x+80, y+30]);
+
+    add_block('simulink/Sinks/Scope', scopeBlock, 'Position', [x+120, y, x+180, y+30]);
+
+    add_line(modelName, [sigName '_From/1'], [sigName '_Scope/1']);
+
+    y = y + yOffset;
+    if y > 900
+        y = 30;
+        x = x + xOffset;
     end
 end
+
+save_system(modelName);
+open_system(modelName);
