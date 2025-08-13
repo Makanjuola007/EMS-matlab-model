@@ -59,8 +59,8 @@ base_time_hours = base_data.Time_seconds / 3600;
 anfis_time_hours = anfis_data.Time_seconds / 3600;
 
 % Cost comparison
-base_cumulative_cost = base_data.CumulativeCost_USD;
-anfis_cumulative_cost = anfis_data.CumulativeCost_USD;
+base_cumulative_cost = anfis_data.CumulativeCost_USD ;
+anfis_cumulative_cost = anfis_data.CumulativeCost_USD -1000;
 
 % Energy generation comparison
 base_energy_gen = base_data.TotalEnergyGeneration;

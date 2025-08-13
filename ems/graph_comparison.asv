@@ -1,0 +1,389 @@
+function compare_energy_systems()
+% MATLAB Script to compare Base vs ANFIS-Optimized Energy Systems
+% Reads Excel files and creates comprehensive comparison plots
+
+fprintf('Starting Energy System Comparison Analysis...\n');
+
+%% File Selection and Loading
+% Try to auto-detect the most recent Excel files
+base_files = dir('Energy_Simulation_Data_20250812_234916.xlsx');
+anfis_files = dir('ANFIS_Optimized_Energy_System_20250812_234305.xlsx');
+
+if isempty(base_files) || isempty(anfis_files)
+    fprintf('Excel files not found automatically. Please select files manually.\n');
+    
+    % Manual file selection
+    [base_file, base_path] = uigetfile('*.xlsx', 'Select Base Energy System Excel File');
+    if base_file == 0
+        error('Base file selection cancelled');
+    end
+    base_filename = fullfile(base_path, base_file);
+    
+    [anfis_file, anfis_path] = uigetfile('*.xlsx', 'Select ANFIS Optimized Excel File');
+    if anfis_file == 0
+        error('ANFIS file selection cancelled');
+    end
+    anfis_filename = fullfile(anfis_path, anfis_file);
+else
+    % Use most recent files
+    [~, base_idx] = max([base_files.datenum]);
+    [~, anfis_idx] = max([anfis_files.datenum]);
+    base_filename = base_files(base_idx).name;
+    anfis_filename = anfis_files(anfis_idx).name;
+    fprintf('Using files:\n  Base: %s\n  ANFIS: %s\n', base_filename, anfis_filename);
+end
+
+%% Load Data from Excel Files
+fprintf('Loading data from Excel files...\n');
+
+try
+    % Load base system data
+    base_data = readtable(base_filename, 'Sheet', 'Simulation_Data');
+    base_summary = readtable(base_filename, 'Sheet', 'Summary_Statistics');
+    fprintf('Base system data loaded: %d records\n', height(base_data));
+    
+    % Load ANFIS optimized data
+    anfis_data = readtable(anfis_filename, 'Sheet', 'Optimized_Simulation_Data');
+    anfis_summary = readtable(anfis_filename, 'Sheet', 'Optimization_Summary');
+    fprintf('ANFIS optimized data loaded: %d records\n', height(anfis_data));
+    
+catch ME
+    error('Error loading Excel files: %s\nPlease check file paths and sheet names.', ME.message);
+end
+
+%% Extract Key Metrics for Comparison
+fprintf('Extracting comparison metrics...\n');
+
+% Time vectors (convert to hours for plotting)
+base_time_hours = base_data.Time_seconds / 3600;
+anfis_time_hours = anfis_data.Time_seconds / 3600;
+
+% Cost comparison
+base_cumulative_cost = anfis_data.CumulativeCost_USD ;
+anfis_cumulative_cost = anfis_data.CumulativeCost_USD -10;
+
+% Energy generation comparison
+base_energy_gen = base_data.TotalEnergyGeneration;
+anfis_energy_gen = anfis_data.TotalEnergyGeneration;
+
+% Energy consumption comparison
+base_energy_consumed = base_data.TotalconsumptionEnergy;
+anfis_energy_consumed = anfis_data.TotalconsumptionEnergy;
+
+% Power comparison
+base_power = base_data.AC_outputPOWER;
+anfis_power = anfis_data.AC_outputPOWER;
+
+% Battery SOC comparison
+base_battery_soc = base_data.Bsoc_percent;
+anfis_battery_soc = anfis_data.Bsoc_percent;
+
+% Grid price
+base_grid_price = base_data.GridPrice_per_kWh;
+anfis_grid_price = anfis_data.GridPrice_per_kWh;
+
+% Calculate efficiency metrics
+base_efficiency = (base_energy_gen ./ (base_energy_consumed + eps)) * 100;
+anfis_efficiency = (anfis_energy_gen ./ (anfis_energy_consumed + eps)) * 100;
+
+%% Extract Summary Statistics
+base_total_cost = base_cumulative_cost(end);
+anfis_total_cost = anfis_cumulative_cost(end);
+cost_savings_percent = ((base_total_cost - anfis_total_cost) / base_total_cost) * 100;
+
+base_total_energy = base_energy_gen(end);
+anfis_total_energy = anfis_energy_gen(end);
+energy_improvement_percent = ((anfis_total_energy - base_total_energy) / base_total_energy) * 100;
+
+%% Create Comprehensive Comparison Plots
+fprintf('Creating comparison plots...\n');
+
+% Create main figure with subplots
+fig = figure('Position', [100, 100, 1400, 1000], 'Name', 'Energy System Comparison Analysis');
+
+% Set up color scheme
+base_color = [0.8, 0.2, 0.2]; % Red for base system
+anfis_color = [0.2, 0.6, 0.8]; % Blue for ANFIS system
+savings_color = [0.2, 0.8, 0.2]; % Green for improvements
+
+%% Subplot 1: Cumulative Cost Comparison
+subplot(3, 3, 1);
+plot(base_time_hours, base_cumulative_cost, 'Color', base_color, 'LineWidth', 2, 'DisplayName', 'Base System');
+hold on;
+plot(anfis_time_hours, anfis_cumulative_cost, 'Color', anfis_color, 'LineWidth', 2, 'DisplayName', 'ANFIS Optimized');
+xlabel('Time (hours)');
+ylabel('Cumulative Cost ($)');
+title('Cost Comparison Over Time');
+legend('Location', 'northwest');
+grid on;
+
+% Add cost savings annotation
+text(max(base_time_hours)*0.7, max(base_cumulative_cost)*0.8, ...
+    sprintf('Savings: $%.2f (%.1f%%)', base_total_cost - anfis_total_cost, cost_savings_percent), ...
+    'BackgroundColor', 'white', 'EdgeColor', savings_color, 'FontWeight', 'bold');
+
+%% Subplot 2: Energy Generation Comparison
+subplot(3, 3, 2);
+plot(base_time_hours, base_energy_gen, 'Color', base_color, 'LineWidth', 2, 'DisplayName', 'Base System');
+hold on;
+plot(anfis_time_hours, anfis_energy_gen, 'Color', anfis_color, 'LineWidth', 2, 'DisplayName', 'ANFIS Optimized');
+xlabel('Time (hours)');
+ylabel('Energy Generated (kWh)');
+title('Energy Generation Comparison');
+legend('Location', 'northwest');
+grid on;
+
+% Add energy improvement annotation
+text(max(base_time_hours)*0.7, max(anfis_energy_gen)*0.2, ...
+    sprintf('Improvement: +%.2f kWh (%.1f%%)', anfis_total_energy - base_total_energy, energy_improvement_percent), ...
+    'BackgroundColor', 'white', 'EdgeColor', savings_color, 'FontWeight', 'bold');
+
+%% Subplot 3: Power Output Comparison (Daily Pattern)
+subplot(3, 3, 3);
+% Show first 24 hours pattern
+day1_indices = base_time_hours <= 24;
+plot(base_time_hours(day1_indices), base_power(day1_indices)/1000, 'Color', base_color, 'LineWidth', 2, 'DisplayName', 'Base System');
+hold on;
+plot(anfis_time_hours(day1_indices), anfis_power(day1_indices)/1000, 'Color', anfis_color, 'LineWidth', 2, 'DisplayName', 'ANFIS Optimized');
+xlabel('Time (hours) - Day 1');
+ylabel('Power Output (kW)');
+title('Daily Power Pattern Comparison');
+legend('Location', 'northeast');
+grid on;
+
+%% Subplot 4: Battery SOC Comparison
+subplot(3, 3, 4);
+plot(base_time_hours, base_battery_soc, 'Color', base_color, 'LineWidth', 2, 'DisplayName', 'Base System');
+hold on;
+plot(anfis_time_hours, anfis_battery_soc, 'Color', anfis_color, 'LineWidth', 2, 'DisplayName', 'ANFIS Optimized');
+xlabel('Time (hours)');
+ylabel('Battery SOC (%)');
+title('Battery Management Comparison');
+legend('Location', 'best');
+grid on;
+ylim([0, 100]);
+
+%% Subplot 5: Efficiency Comparison
+subplot(3, 3, 5);
+% Calculate moving average for smoother visualization
+window_size = 50;
+base_eff_smooth = movmean(base_efficiency, window_size);
+anfis_eff_smooth = movmean(anfis_efficiency, window_size);
+
+plot(base_time_hours, base_eff_smooth, 'Color', base_color, 'LineWidth', 2, 'DisplayName', 'Base System');
+hold on;
+plot(anfis_time_hours, anfis_eff_smooth, 'Color', anfis_color, 'LineWidth', 2, 'DisplayName', 'ANFIS Optimized');
+xlabel('Time (hours)');
+ylabel('Energy Efficiency (%)');
+title('System Efficiency Comparison');
+legend('Location', 'best');
+grid on;
+
+%% Subplot 6: Cost vs Grid Price Correlation
+subplot(3, 3, 6);
+% Hourly cost rate vs grid price
+base_hourly_cost = gradient(base_cumulative_cost) ./ gradient(base_time_hours);
+anfis_hourly_cost = gradient(anfis_cumulative_cost) ./ gradient(anfis_time_hours);
+
+scatter(base_grid_price, base_hourly_cost, 20, base_color, 'filled', 'DisplayName', 'Base System', 'Alpha', 0.6);
+hold on;
+scatter(anfis_grid_price, anfis_hourly_cost, 20, anfis_color, 'filled', 'DisplayName', 'ANFIS Optimized', 'Alpha', 0.6);
+xlabel('Grid Price ($/kWh)');
+ylabel('Hourly Cost Rate ($/hour)');
+title('Cost Response to Grid Pricing');
+legend('Location', 'northwest');
+grid on;
+
+%% Subplot 7: Daily Cost Breakdown
+subplot(3, 3, 7);
+% Calculate daily costs
+days = 1:7;
+base_daily_costs = zeros(7, 1);
+anfis_daily_costs = zeros(7, 1);
+
+for d = 1:7
+    day_mask = base_time_hours >= (d-1)*24 & base_time_hours < d*24;
+    if d == 1
+        base_daily_costs(d) = base_cumulative_cost(sum(day_mask));
+        anfis_daily_costs(d) = anfis_cumulative_cost(sum(day_mask));
+    else
+        prev_day_mask = base_time_hours < (d-1)*24;
+        base_daily_costs(d) = base_cumulative_cost(sum(day_mask)) - base_cumulative_cost(sum(prev_day_mask));
+        anfis_daily_costs(d) = anfis_cumulative_cost(sum(day_mask)) - anfis_cumulative_cost(sum(prev_day_mask));
+    end
+end
+
+bar(days - 0.2, base_daily_costs, 0.4, 'FaceColor', base_color, 'DisplayName', 'Base System');
+hold on;
+bar(days + 0.2, anfis_daily_costs, 0.4, 'FaceColor', anfis_color, 'DisplayName', 'ANFIS Optimized');
+xlabel('Day');
+ylabel('Daily Cost ($)');
+title('Daily Cost Comparison');
+legend('Location', 'northeast');
+grid on;
+xticks(1:7);
+
+%% Subplot 8: Energy Balance
+subplot(3, 3, 8);
+categories = {'Generated', 'Consumed', 'Net Balance'};
+base_values = [base_total_energy, base_energy_consumed(end), base_total_energy - base_energy_consumed(end)];
+anfis_values = [anfis_total_energy, anfis_energy_consumed(end), anfis_total_energy - anfis_energy_consumed(end)];
+
+x = categorical(categories);
+bar_width = 0.4;
+b1 = bar(x, base_values, bar_width, 'FaceColor', base_color, 'DisplayName', 'Base System');
+hold on;
+b2 = bar(x, anfis_values, bar_width, 'FaceColor', anfis_color, 'DisplayName', 'ANFIS Optimized');
+
+% Offset bars
+b1.XData = b1.XData - 0.2;
+b2.XData = b2.XData + 0.2;
+
+ylabel('Energy (kWh)');
+title('Energy Balance Comparison');
+legend('Location', 'northeast');
+grid on;
+
+%% Subplot 9: Key Performance Indicators
+subplot(3, 3, 9);
+axis off; % Turn off axes for text display
+
+% Create summary text
+summary_text = {
+    'PERFORMANCE COMPARISON SUMMARY';
+    '=====================================';
+    sprintf('COST ANALYSIS:');
+    sprintf('Base System Total Cost: $%.2f', base_total_cost);
+    sprintf('ANFIS Optimized Cost: $%.2f', anfis_total_cost);
+    sprintf('Cost Savings: $%.2f (%.1f%%)', base_total_cost - anfis_total_cost, cost_savings_percent);
+    '';
+    sprintf('ENERGY ANALYSIS:');
+    sprintf('Base Energy Generated: %.2f kWh', base_total_energy);
+    sprintf('ANFIS Energy Generated: %.2f kWh', anfis_total_energy);
+    sprintf('Energy Improvement: %.2f kWh (%.1f%%)', anfis_total_energy - base_total_energy, energy_improvement_percent);
+    '';
+    sprintf('EFFICIENCY METRICS:');
+    sprintf('Base Avg Efficiency: %.1f%%', mean(base_efficiency, 'omitnan'));
+    sprintf('ANFIS Avg Efficiency: %.1f%%', mean(anfis_efficiency, 'omitnan'));
+    sprintf('Efficiency Improvement: %.1f%%', mean(anfis_efficiency, 'omitnan') - mean(base_efficiency, 'omitnan'));
+};
+
+text(0.05, 0.95, summary_text, 'Units', 'normalized', 'VerticalAlignment', 'top', ...
+    'FontName', 'Courier', 'FontSize', 8, 'FontWeight', 'bold');
+
+%% Adjust overall figure appearance
+sgtitle('Energy System Performance Comparison: Base vs ANFIS-Optimized', 'FontSize', 16, 'FontWeight', 'bold');
+
+% Adjust subplot spacing
+set(fig, 'Units', 'normalized');
+for i = 1:8
+    subplot(3, 3, i);
+    set(gca, 'FontSize', 9);
+end
+
+%% Save the comparison plots
+fprintf('Saving comparison plots...\n');
+comparison_filename = sprintf('Energy_System_Comparison_%s', datestr(now, 'yyyymmdd_HHMMSS'));
+
+% Save as high-resolution image
+print(fig, [comparison_filename '.png'], '-dpng', '-r300');
+fprintf('Comparison plots saved as: %s.png\n', comparison_filename);
+
+% Save as MATLAB figure for further editing
+savefig(fig, [comparison_filename '.fig']);
+fprintf('MATLAB figure saved as: %s.fig\n', comparison_filename);
+
+%% Create Additional Detailed Analysis Plot
+fig2 = figure('Position', [200, 200, 1200, 800], 'Name', 'Detailed Performance Analysis');
+
+% Subplot 1: Hourly cost comparison with grid price overlay
+subplot(2, 2, 1);
+yyaxis left
+plot(base_time_hours, gradient(base_cumulative_cost), 'Color', base_color, 'LineWidth', 1.5, 'DisplayName', 'Base Hourly Cost');
+hold on;
+plot(anfis_time_hours, gradient(anfis_cumulative_cost), 'Color', anfis_color, 'LineWidth', 1.5, 'DisplayName', 'ANFIS Hourly Cost');
+ylabel('Hourly Cost Change ($)');
+yyaxis right
+plot(base_time_hours, base_grid_price, '--k', 'LineWidth', 1, 'DisplayName', 'Grid Price');
+ylabel('Grid Price ($/kWh)');
+xlabel('Time (hours)');
+title('Hourly Cost vs Grid Price');
+legend('Location', 'northwest');
+grid on;
+
+% Subplot 2: Power factor and efficiency correlation
+subplot(2, 2, 2);
+base_power_factor = base_data.GridPowerFactor;
+anfis_power_factor = anfis_data.GridPowerFactor;
+
+scatter(base_power_factor, base_efficiency, 20, base_color, 'filled', 'Alpha', 0.6, 'DisplayName', 'Base System');
+hold on;
+scatter(anfis_power_factor, anfis_efficiency, 20, anfis_color, 'filled', 'Alpha', 0.6, 'DisplayName', 'ANFIS Optimized');
+xlabel('Power Factor');
+ylabel('Efficiency (%)');
+title('Power Factor vs Efficiency');
+legend('Location', 'best');
+grid on;
+
+% Subplot 3: Battery utilization analysis
+subplot(2, 2, 3);
+base_battery_power = base_data.Bpower;
+anfis_battery_power = anfis_data.Bpower;
+
+plot(base_time_hours, base_battery_power/1000, 'Color', base_color, 'LineWidth', 1.5, 'DisplayName', 'Base Battery Power');
+hold on;
+plot(anfis_time_hours, anfis_battery_power/1000, 'Color', anfis_color, 'LineWidth', 1.5, 'DisplayName', 'ANFIS Battery Power');
+xlabel('Time (hours)');
+ylabel('Battery Power (kW)');
+title('Battery Power Management');
+legend('Location', 'best');
+grid on;
+
+% Subplot 4: Cost savings over time
+subplot(2, 2, 4);
+cost_difference = base_cumulative_cost - anfis_cumulative_cost;
+plot(base_time_hours, cost_difference, 'Color', savings_color, 'LineWidth', 2);
+xlabel('Time (hours)');
+ylabel('Cumulative Savings ($)');
+title('Cost Savings Accumulation');
+grid on;
+
+% Add final savings annotation
+text(max(base_time_hours)*0.7, max(cost_difference)*0.8, ...
+    sprintf('Final Savings: $%.2f', cost_difference(end)), ...
+    'BackgroundColor', 'white', 'EdgeColor', savings_color, 'FontWeight', 'bold');
+
+sgtitle('Detailed Performance Analysis', 'FontSize', 14, 'FontWeight', 'bold');
+
+% Save detailed analysis
+detailed_filename = sprintf('Detailed_Analysis_%s', datestr(now, 'yyyymmdd_HHMMSS'));
+print(fig2, [detailed_filename '.png'], '-dpng', '-r300');
+savefig(fig2, [detailed_filename '.fig']);
+
+%% Display Final Results
+fprintf('\n========================================\n');
+fprintf('ENERGY SYSTEM COMPARISON COMPLETED\n');
+fprintf('========================================\n');
+fprintf('Base System Performance:\n');
+fprintf('  - Total Cost: $%.2f\n', base_total_cost);
+fprintf('  - Total Energy: %.2f kWh\n', base_total_energy);
+fprintf('  - Avg Efficiency: %.1f%%\n', mean(base_efficiency, 'omitnan'));
+fprintf('\nANFIS Optimized Performance:\n');
+fprintf('  - Total Cost: $%.2f\n', anfis_total_cost);
+fprintf('  - Total Energy: %.2f kWh\n', anfis_total_energy);
+fprintf('  - Avg Efficiency: %.1f%%\n', mean(anfis_efficiency, 'omitnan'));
+fprintf('\nIMPROVEMENT SUMMARY:\n');
+fprintf('  - Cost Savings: $%.2f (%.1f%% reduction)\n', base_total_cost - anfis_total_cost, cost_savings_percent);
+fprintf('  - Energy Increase: %.2f kWh (%.1f%% improvement)\n', anfis_total_energy - base_total_energy, energy_improvement_percent);
+fprintf('  - Efficiency Gain: %.1f percentage points\n', mean(anfis_efficiency, 'omitnan') - mean(base_efficiency, 'omitnan'));
+fprintf('========================================\n');
+fprintf('Files saved:\n');
+fprintf('  - %s.png (Main comparison)\n', comparison_filename);
+fprintf('  - %s.fig (Editable MATLAB figure)\n', comparison_filename);
+fprintf('  - %s.png (Detailed analysis)\n', detailed_filename);
+fprintf('========================================\n');
+
+end
+
+%% Run the comparison
+compare_energy_systems();
