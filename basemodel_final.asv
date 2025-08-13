@@ -1,0 +1,310 @@
+% Enhanced Energy System Simulation for 24 Hours
+% This script creates a comprehensive solar energy system model with realistic
+% signal patterns for PV generation, battery storage, grid interaction, and loads
+
+clear; clc;
+
+% Model Configuration
+modelName = 'EnergyMonitoring24h_Enhanced';
+
+% Create new Simulink model
+try
+    close_system(modelName, 0);
+catch
+    % Model doesn't exist yet
+end
+
+new_system(modelName);
+open_system(modelName);
+set_param(modelName, 'StopTime', '86400'); % 24 hours in seconds
+
+% Time Configuration
+fprintf('Setting up time vector and simulation parameters...\n');
+time_hours = linspace(0, 24, 1000);  % 24 hours
+time = time_hours * 3600;            % Convert to seconds
+
+% Solar Irradiance Model (realistic daily pattern)
+solar_hours = mod(time_hours, 24);
+solar_irradiance = zeros(size(solar_hours));
+sunrise = 6; sunset = 18;
+solar_mask = (solar_hours >= sunrise) & (solar_hours <= sunset);
+solar_irradiance(solar_mask) = 1000 * sin(pi * (solar_hours(solar_mask) - sunrise) / (sunset - sunrise)).^2;
+
+% PV System Signals (2 strings)
+pv_efficiency = 0.20;  % 20% efficiency
+pv_area = 50;          % 50 m² per string
+dcv_pv1 = 35 + 15 * sqrt(solar_irradiance / 1000);  % Voltage varies with irradiance
+dcv_pv2 = dcv_pv1 + 0.5 * randn(size(dcv_pv1));    % String 2 with slight variation
+dci_pv1 = pv_area * pv_efficiency * solar_irradiance / 1000 ./ (dcv_pv1 + eps);
+dci_pv2 = pv_area * pv_efficiency * solar_irradiance / 1000 ./ (dcv_pv2 + eps);
+
+% AC Output from Inverter
+inverter_efficiency = 0.95;
+ac_voltage = 230 + 5 * sin(2*pi*time_hours/24) + 2 * randn(size(time_hours)); % Grid voltage variation
+ac_power_pv1 = dcv_pv1 .* dci_pv1 * inverter_efficiency;
+ac_power_pv2 = dcv_pv2 .* dci_pv2 * inverter_efficiency;
+ac_power_total = ac_power_pv1 + ac_power_pv2;
+ac_current = ac_power_total ./ (ac_voltage + eps);
+ac_freq = 50 + 0.2 * sin(2*pi*time_hours/24) + 0.1 * randn(size(time_hours));
+
+% Energy Calculations
+total_energy_gen = cumtrapz(time, ac_power_total) / 3600; % Wh
+
+% Load Profile (realistic daily consumption pattern)
+base_load = 2000;  % Base load in watts
+morning_peak = 1000 * exp(-((time_hours - 7).^2) / 2);      % Morning peak at 7 AM
+evening_peak = 1500 * exp(-((time_hours - 19).^2) / 2);     % Evening peak at 7 PM
+night_reduction = 0.5 * (1 + cos(2*pi*time_hours/24));      % Night reduction
+load_power = base_load + morning_peak + evening_peak + 500 * night_reduction;
+total_energy_consumed = cumtrapz(time, load_power) / 3600;
+
+% Grid Interface
+grid_voltage = 240 + 3 * sin(2*pi*time_hours/12) + randn(size(time_hours));
+net_power = ac_power_total - load_power;  % Positive = export, Negative = import
+grid_current = net_power ./ (grid_voltage + eps);
+grid_reactive_power = 200 * sin(2*pi*time_hours/24);
+grid_apparent_power = sqrt(net_power.^2 + grid_reactive_power.^2);
+grid_power_factor = abs(net_power) ./ (grid_apparent_power + eps);
+
+% Battery System (Realistic charge/discharge cycles)
+battery_capacity = 10000; % Wh
+initial_soc = 50;          % Initial state of charge (%)
+
+% Battery control logic: charge during high PV, discharge during high load
+charge_threshold = 1000;   % Start charging when excess PV > 1kW
+discharge_threshold = -500; % Start discharging when deficit > 500W
+
+b_voltage = zeros(size(time));
+b_current = zeros(size(time));
+b_power = zeros(size(time));
+bsoc = zeros(size(time));
+bsoc(1) = initial_soc;
+
+% Battery simulation with realistic SOC dynamics
+for i = 2:length(time)
+    dt = time(i) - time(i-1);
+    
+    if net_power(i) > charge_threshold && bsoc(i-1) < 95
+        % Charging mode
+        charge_power = min(3000, net_power(i) * 0.8,(95 - bsoc(i-1)) * battery_capacity / 100);
+        b_power(i) = charge_power;
+        b_voltage(i) = 48 + 4 * (bsoc(i-1) / 100);  % Voltage increases with SOC
+        b_current(i) = charge_power / b_voltage(i);
+        energy_charged = charge_power * dt / 3600;
+        bsoc(i) = bsoc(i-1) + (energy_charged / battery_capacity) * 100;
+    elseif net_power(i) < discharge_threshold && bsoc(i-1) > 20
+        % Discharging mode
+        discharge_power = min(3000, abs(net_power(i)) * 0.8,(bsoc(i-1) - 20) * battery_capacity / 100);
+        b_power(i) = -discharge_power;
+        b_voltage(i) = 44 + 4 * (bsoc(i-1) / 100);
+        b_current(i) = -discharge_power / b_voltage(i);
+        energy_discharged = discharge_power * dt / 3600;
+        bsoc(i) = bsoc(i-1) - (energy_discharged / battery_capacity) * 100;
+    else
+        % Standby mode
+        b_power(i) = 0;
+        b_voltage(i) = 48;
+        b_current(i) = 0;
+        bsoc(i) = bsoc(i-1);
+    end
+end
+
+% Battery energy totals
+total_energy_charge = cumtrapz(time, max(b_power, 0)) / 3600;
+total_energy_discharge = cumtrapz(time, max(-b_power, 0)) / 3600;
+
+% System temperatures
+ambient_temp = 25 + 10 * sin(2*pi*(time_hours - 12)/24);  % Daily temperature cycle
+inverter_temp = ambient_temp + 15 + 0.01 * ac_power_total;
+battery_temp = ambient_temp + 5 + 0.005 * abs(b_power);
+
+% BMS Signals
+bms_voltage = b_voltage + 0.1 * randn(size(b_voltage));
+bms_current = b_current + 0.05 * randn(size(b_current));
+
+% Updated grid calculations with battery
+meter_power = load_power - ac_power_total - b_power;  % Net grid power
+total_on_grid_gen = max(-meter_power, 0);  % Power exported to grid
+total_grid_consumption = max(meter_power, 0);  % Power imported from grid
+
+fprintf('Signal generation complete. Creating Simulink model...\n');
+
+% Define all signals with descriptive names
+signals = {
+    'PV1_DC_Voltage', dcv_pv1, 'V';
+    'PV2_DC_Voltage', dcv_pv2, 'V';
+    'PV1_DC_Current', dci_pv1, 'A';
+    'PV2_DC_Current', dci_pv2, 'A';
+    'AC_Voltage', ac_voltage, 'V';
+    'AC_Current', ac_current, 'A';
+    'AC_Power_Output', ac_power_total, 'W';
+    'AC_Frequency', ac_freq, 'Hz';
+    'Total_Energy_Generation', total_energy_gen, 'Wh';
+    'Load_Power_Consumed', load_power, 'W';
+    'Total_Energy_Consumed', total_energy_consumed, 'Wh';
+    'Grid_Voltage', grid_voltage, 'V';
+    'Grid_Current', grid_current, 'A';
+    'Grid_Reactive_Power', grid_reactive_power, 'VAR';
+    'Grid_Apparent_Power', grid_apparent_power, 'VA';
+    'Grid_Power_Factor', grid_power_factor, '-';
+    'Grid_Export_Power', total_on_grid_gen, 'W';
+    'Meter_Net_Power', meter_power, 'W';
+    'Battery_Voltage', b_voltage, 'V';
+    'Battery_Current', b_current, 'A';
+    'Battery_Power', b_power, 'W';
+    'Battery_SOC', bsoc, '%';
+    'Battery_Energy_Charge', total_energy_charge, 'Wh';
+    'Battery_Energy_Discharge', total_energy_discharge, 'Wh';
+    'Inverter_Temperature', inverter_temp, '°C';
+    'Battery_Temperature', battery_temp, '°C';
+    'BMS_Voltage', bms_voltage, 'V';
+    'BMS_Current', bms_current, 'A';
+    'Solar_Irradiance', solar_irradiance, 'W/m²';
+    'Ambient_Temperature', ambient_temp, '°C'
+};
+
+% Create timeseries objects and assign to workspace
+fprintf('Creating timeseries objects...\n');
+for i = 1:size(signals, 1)
+    signal_name = signals{i,1};
+    signal_data = signals{i,2};
+    signal_unit = signals{i,3};
+    
+    ts = timeseries(signal_data, time, 'Name', signal_name);
+    ts.DataInfo.Units = signal_unit;
+    assignin('base', [signal_name '_ts'], ts);
+end
+
+% Create organized layout in Simulink model
+fprintf('Building Simulink model blocks...\n');
+
+% Layout parameters
+start_x = 50; start_y = 50;
+block_width = 120; block_height = 30;
+x_spacing = 200; y_spacing = 80;
+scope_offset_x = 150;
+
+% Group signals by subsystem
+signal_groups = {
+    'PV System', 1:4;
+    'AC Output', 5:8;
+    'Energy Totals', 9:11;
+    'Grid Interface', 12:18;
+    'Battery System', 19:26;
+    'Temperatures', 27:28;
+    'BMS Monitoring', 29:30;
+    'Environmental', 31:32
+};
+
+current_y = start_y;
+for group_idx = 1:size(signal_groups, 1)
+    group_name = signal_groups{group_idx, 1};
+    signal_indices = signal_groups{group_idx, 2};
+    
+    % Add group annotation
+    annotation_pos = [start_x-30, current_y-10, start_x+300, current_y+10];
+    add_block('built-in/Note', [modelName '/Group_' group_name], ...
+              'Position', annotation_pos, ...
+              'Text', ['--- ' group_name ' ---'], ...
+              'FontSize', 12, 'FontWeight', 'bold');
+    
+    current_y = current_y + 40;
+    
+    for i = signal_indices
+        signal_name = signals{i,1};
+        
+        % From Workspace block
+        from_block = [modelName '/' signal_name '_Source'];
+        from_pos = [start_x, current_y, start_x+block_width, current_y+block_height];
+        
+        add_block('simulink/Sources/From Workspace', from_block, ...
+                  'VariableName', [signal_name '_ts'], ...
+                  'Position', from_pos);
+        
+        % Scope block
+        scope_block = [modelName '/' signal_name '_Display'];
+        scope_pos = [start_x+scope_offset_x, current_y, ...
+                    start_x+scope_offset_x+80, current_y+block_height];
+        
+        add_block('simulink/Sinks/Scope', scope_block, ...
+                  'Position', scope_pos);
+        
+        % Connect blocks
+        add_line(modelName, [signal_name '_Source/1'], [signal_name '_Display/1']);
+        
+        current_y = current_y + y_spacing;
+    end
+    
+    current_y = current_y + 50; % Extra space between groups
+end
+
+% Save and display model
+save_system(modelName);
+fprintf('Model created successfully: %s\n', modelName);
+
+% Generate summary report
+fprintf('\n=== ENERGY SYSTEM SIMULATION SUMMARY ===\n');
+fprintf('Simulation Duration: 24 hours\n');
+fprintf('Total PV Generation: %.2f kWh\n', total_energy_gen(end)/1000);
+fprintf('Total Load Consumption: %.2f kWh\n', total_energy_consumed(end)/1000);
+fprintf('Battery Energy Cycled: %.2f kWh charged, %.2f kWh discharged\n', ...
+        total_energy_charge(end)/1000, total_energy_discharge(end)/1000);
+fprintf('Peak PV Power: %.1f kW\n', max(ac_power_total)/1000);
+fprintf('Peak Load: %.1f kW\n', max(load_power)/1000);
+fprintf('Final Battery SOC: %.1f%%\n', bsoc(end));
+
+% Create summary plots
+fprintf('\nCreating summary plots...\n');
+
+figure('Name', 'Energy System Overview', 'Position', [100, 100, 1200, 800]);
+
+% Plot 1: Power flows
+subplot(2,2,1);
+plot(time_hours, ac_power_total/1000, 'b-', 'LineWidth', 2);
+hold on;
+plot(time_hours, load_power/1000, 'r-', 'LineWidth', 2);
+plot(time_hours, b_power/1000, 'g-', 'LineWidth', 2);
+xlabel('Time (hours)');
+ylabel('Power (kW)');
+title('System Power Flows');
+legend('PV Generation', 'Load Consumption', 'Battery Power', 'Location', 'best');
+grid on;
+
+% Plot 2: Battery SOC and voltage
+subplot(2,2,2);
+yyaxis left;
+plot(time_hours, bsoc, 'b-', 'LineWidth', 2);
+ylabel('Battery SOC (%)');
+yyaxis right;
+plot(time_hours, b_voltage, 'r--', 'LineWidth', 1.5);
+ylabel('Battery Voltage (V)');
+xlabel('Time (hours)');
+title('Battery Status');
+grid on;
+
+% Plot 3: Energy accumulation
+subplot(2,2,3);
+plot(time_hours, total_energy_gen/1000, 'b-', 'LineWidth', 2);
+hold on;
+plot(time_hours, total_energy_consumed/1000, 'r-', 'LineWidth', 2);
+xlabel('Time (hours)');
+ylabel('Cumulative Energy (kWh)');
+title('Energy Generation vs Consumption');
+legend('Generated', 'Consumed', 'Location', 'northwest');
+grid on;
+
+% Plot 4: Grid interaction
+subplot(2,2,4);
+plot(time_hours, meter_power/1000, 'k-', 'LineWidth', 2);
+hold on;
+plot(time_hours, zeros(size(time_hours)), 'k--', 'LineWidth', 1);
+xlabel('Time (hours)');
+ylabel('Grid Power (kW)');
+title('Grid Import/Export');
+legend('Net Grid Power', 'Zero Line', 'Location', 'best');
+grid on;
+
+% Add overall title
+sgtitle('24-Hour Energy System Simulation Results', 'FontSize', 16, 'FontWeight', 'bold');
+
+fprintf('Simulation setup complete! Run the model to see live data.\n');
